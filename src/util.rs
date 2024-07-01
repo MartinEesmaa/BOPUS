@@ -36,19 +36,37 @@ pub fn get_audio_time(input: &Path) -> Duration {
 
     cmd.stderr(Stdio::piped());
 
-    let output = String::from_utf8(cmd.output().unwrap().stderr).unwrap();
-    debug!("{:?}", output);
+    let output = match cmd.output() {
+        Ok(output) => match String::from_utf8(output.stderr) {
+            Ok(output) => output,
+            Err(e) => {
+                eprintln!("Failed to convert output to UTF-8: {:?}", e);
+                return Duration::from_secs(0);
+            }
+        },
+        Err(e) => {
+            eprintln!("Failed to execute ffprobe command: {:?}", e);
+            return Duration::from_secs(0);
+        }
+    };
 
     const START: &str = "Duration: ";
     const END: &str = ", start";
 
-    let s = &output[output.find(START).unwrap() + START.len()..output.find(END).unwrap()];
+    let duration_str = match (output.find(START), output.find(END)) {
+        (Some(start_index), Some(end_index)) => {
+            &output[start_index + START.len()..end_index]
+        }
+        _ => {
+            eprintln!("Failed to find duration in ffprobe output");
+            return Duration::from_secs(0);
+        }
+    };
 
-    let mut iter = s.split(':');
-    // TODO clean up the error handling here
-    let hours: u64 = iter.next().unwrap().parse().unwrap();
-    let minutes: u64 = iter.next().unwrap().parse().unwrap();
-    let millis: u64 = (1000.0 * iter.next().unwrap().parse::<f32>().unwrap()) as u64;
+    let mut iter = duration_str.split(':');
+    let hours: u64 = iter.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minutes: u64 = iter.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let millis: u64 = (1000.0 * iter.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0)) as u64;
 
     Duration::from_millis(millis + minutes * MILLIS_PER_MINUTE + hours * MILLIS_PER_HOUR)
 }
